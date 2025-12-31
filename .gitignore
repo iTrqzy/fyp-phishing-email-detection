@@ -209,3 +209,9 @@ __marimo__/
 data/raw/
 data/interim/
 data/processed/
+
+# datasets
+
+# training outputs
+artifacts/
+
