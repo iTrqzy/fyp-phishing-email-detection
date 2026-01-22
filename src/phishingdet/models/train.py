@@ -16,6 +16,8 @@ from sklearn.metrics import (
     classification_report,
     roc_auc_score,
     average_precision_score,
+    balanced_accuracy_score,
+    matthews_corrcoef,
 )
 
 from phishingdet.data.loader import load_email, repo_root, dataset_path
@@ -122,7 +124,33 @@ def train_model(test_size=0.2, random_state=42, max_features=5000):
     # predict
     predictions = model.predict(x_test)
 
-    # metrics
+    # ------------------------------------------------------------
+    # METRICS (INCLUDING IMBALANCE-AWARE METRICS)
+    # ------------------------------------------------------------
+    # Many email datasets are imbalanced (e.g., far more phishing than legit, or vice versa).
+    # In imbalanced settings, Accuracy can look "great" even for a weak model.
+    # This reports additional metrics that stay informative when classes are skewed.
+
+    # 1) Majority-class baseline accuracy
+    # "What accuracy would we get if we predicted the most common class every time?"
+    # This is a sanity-check baseline: the model should beat this clearly.
+    majority_label = 1 if sum(y_test) > (len(y_test) / 2) else 0
+    majority_baseline_acc = sum(1 for y in y_test if y == majority_label) / len(y_test)
+
+    # 2) Balanced Accuracy
+    # This averages recall across classes, so each class contributes equally.
+    # Useful when one class dominates (prevents inflated performance reporting).
+    bal_acc = balanced_accuracy_score(y_test, predictions)
+
+    # 3) Matthews Correlation Coefficient (MCC)
+    # A robust single-number score for binary classification in [-1, 1]:
+    #   1.0 = perfect prediction
+    #   0.0 = random / no better than chance
+    #  -1.0 = perfectly wrong
+    # MCC is widely used because it remains reliable under class imbalance.
+    mcc = matthews_corrcoef(y_test, predictions)
+
+    # Standard metrics
     accuracy = accuracy_score(y_test, predictions)
     precision = precision_score(y_test, predictions, zero_division=0)
     recall = recall_score(y_test, predictions, zero_division=0)
@@ -133,6 +161,10 @@ def train_model(test_size=0.2, random_state=42, max_features=5000):
     print("  Precision:", round(precision, 3))
     print("  Recall   :", round(recall, 3))
     print("  F1 Score :", round(f1, 3))
+
+    print("  Majority-class baseline accuracy:", round(majority_baseline_acc, 3))
+    print("  Balanced accuracy:", round(bal_acc, 3))
+    print("  MCC:", round(mcc, 3))
 
     ##### DOCUMENTATION OUTPUT START #####
     print("\nDataset info:")
@@ -230,6 +262,9 @@ def train_model(test_size=0.2, random_state=42, max_features=5000):
             "pr_auc": float(pr_auc) if pr_auc is not None else None,
             "best_threshold_f1": float(best_t) if best_t is not None else None,
             "label_shuffle_accuracy": float(shuffle_acc) if shuffle_acc is not None else None,
+            "majority_baseline_accuracy": float(majority_baseline_acc),
+            "balanced_accuracy": float(bal_acc),
+            "mcc": float(mcc),
         },
         "confusion_matrix": cm.tolist(),
     }

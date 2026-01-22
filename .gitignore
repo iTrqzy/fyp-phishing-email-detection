@@ -215,3 +215,11 @@ data/raw/Phishing_Email.
 
 # training outputs
 artifacts/
+artifacts/system_information/cpu_windows.txt
+artifacts/system_information/env_pip_freeze_windows.txt
+artifacts/system_information/gpu_windows.txt
+artifacts/dataset_hashes.txt
+artifacts/system_information/system_windows.txt
+artifacts/runtime_train_windows.txt
+artifacts/runtime_train_windows_3runs.txt
+artifacts/logs_train_real.txt
