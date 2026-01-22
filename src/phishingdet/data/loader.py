@@ -4,12 +4,13 @@ import pandas as pd
 PHISHING_LABEL = 1
 LEGIT_LABEL = 0
 
-# Change this to switch datasets
-DATASET_FILENAME = "sample_emails_50k.csv"
+# MANUAL: change this when you switch datasets
+DATASET_FILENAME = "Phishing_Email.csv"
+# e.g. "sample_emails_50k.csv"
 
 
 def repo_root():
-    # Cross-platform: finds repo root based on this file's location
+    # src/phishingdet/data/loader.py -> repo root is 3 levels up
     return Path(__file__).resolve().parents[3]
 
 
@@ -18,26 +19,64 @@ def dataset_path():
 
 
 def load_email():
-    csv_file_path = dataset_path()
+    path = dataset_path()
+    df = pd.read_csv(path)
 
-    if not csv_file_path.exists():
-        raise FileNotFoundError(f"Dataset not found: {csv_file_path}")
+    if {"text", "label"}.issubset(df.columns):
+        df = df[["text", "label"]].copy()
+        df["text"] = df["text"].astype(str).str.strip()
+        df["label"] = df["label"].astype(int)
 
-    df = pd.read_csv(csv_file_path)
+    elif {"Email Text", "Email Type"}.issubset(df.columns):
+        df = df[["Email Text", "Email Type"]].copy()
+        df = df.rename(columns={"Email Text": "text", "Email Type": "label"})
 
-    # basic checks
-    if "text" not in df.columns or "label" not in df.columns:
-        raise ValueError("CSV must contain columns: 'text' and 'label'")
+        df["text"] = df["text"].astype(str).str.strip()
+        df["label"] = df["label"].astype(str).str.strip().str.lower()
 
-    df = df[["text", "label"]].copy()
+        # Maps different label strings -> 0/1
+        mapping = {
+            "safe email": LEGIT_LABEL,
+            "legit email": LEGIT_LABEL,
+            "ham": LEGIT_LABEL,
+            "phishing email": PHISHING_LABEL,
+            "phishing": PHISHING_LABEL,
+            "spam": PHISHING_LABEL,
+        }
 
-    # formatting
-    df["text"] = df["text"].astype(str).str.strip()
-    df["label"] = df["label"].astype(int)
+        df["label"] = df["label"].map(mapping)
 
-    # safety check: labels should be 0/1
-    bad = set(df["label"].unique()) - {0, 1}
-    if bad:
-        raise ValueError(f"Labels must be 0/1 only. Found: {sorted(list(bad))}")
+        # If mapping failed for some rows, show what labels exist
+        if df["label"].isna().any():
+            unknown = (
+                pd.read_csv(path)[["Email Type"]]
+                .astype(str)
+                .dropna()["Email Type"]
+                .str.strip()
+                .value_counts()
+                .head(20)
+            )
+            raise ValueError(
+                "Found label values that loader.py doesn't recognise.\n"
+                "Update the mapping dict.\n\n"
+                f"Top label values:\n{unknown}"
+            )
+
+        df["label"] = df["label"].astype(int)
+
+    else:
+        raise ValueError(
+            "CSV schema not recognised. Expected either:\n"
+            "  - columns: text, label\n"
+            "  - columns: Email Text, Email Type\n\n"
+            f"Got columns:\n{list(df.columns)}"
+        )
+
+    # ---------- basic cleaning ----------
+    df = df.dropna(subset=["text", "label"])
+    df = df[df["text"].str.len() > 0].copy()
+
+    # removes duplicate texts to reduce train/test leakage
+    df = df.drop_duplicates(subset=["text"]).reset_index(drop=True)
 
     return df
