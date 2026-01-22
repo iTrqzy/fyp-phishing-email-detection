@@ -209,9 +209,9 @@ __marimo__/
 data/raw/
 data/interim/
 data/processed/
+data/raw/Phishing_Email.
 
 # datasets
 
 # training outputs
 artifacts/
-
