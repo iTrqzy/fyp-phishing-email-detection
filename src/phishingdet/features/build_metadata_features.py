@@ -1,6 +1,14 @@
 import re
 from sklearn.feature_extraction import DictVectorizer
 
+"""
+Stage 2:
+Building the metadata features from emails (URLs, length, uppercase ratio, header/domain mismatch
+Each email becomes a dictionary of numbers/flags.
+DictVectorizer converts those dictionaries into a numeric feature matrix.
+
+Need to make the logistic regression on the metadata features.
+"""
 
 def safe_text(x):
     # Make sure we always work with a string
@@ -94,7 +102,7 @@ def extract_metadata_features_one(text):
     feats["has_reply"] = 1 if reply_value else 0
     feats["has_subject"] = 1 if subject_value else 0
 
-    # Domain features (categorical -> DictVectorizer will one-hot them)
+    # Domain features (categorical -> DictVectorizer will utilise them)
     from_domain = extract_email_domain(from_value)
     reply_domain = extract_email_domain(reply_value)
 
@@ -103,7 +111,8 @@ def extract_metadata_features_one(text):
     if reply_domain:
         feats["reply_domain=" + reply_domain] = 1
 
-    # Mismatch is a common phishing pattern
+    # Checks if from_domain, reply_domain exist and that they are different
+    # From: support@paypal.com but Reply-To goes to attacker stealinfo@gmail.com
     feats["reply_domain_mismatch"] = 1 if (from_domain and reply_domain and from_domain != reply_domain) else 0
 
     return feats
@@ -130,6 +139,4 @@ def transform_metadata_vectorizer(vectorizer, texts):
 
 
 if __name__ == "__main__":
-    print(extract_metadata_features_one(
-        "Win a free iPhone now!!! Click here http://1.2.3.4/login"
-    ))
+    print(extract_metadata_features_one("Win a free iPhone now!!! Click here http://1.2.3.4/login" ))
