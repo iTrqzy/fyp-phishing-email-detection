@@ -223,3 +223,7 @@ artifacts/system_information/system_windows.txt
 artifacts/runtime_train_windows.txt
 artifacts/runtime_train_windows_3runs.txt
 artifacts/logs_train_real.txt
+artifacts/stage2_metadata
+*.joblib
+*.json
+*.csv
