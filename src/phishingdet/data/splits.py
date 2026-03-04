@@ -14,7 +14,7 @@ def get_or_make_split_indicies(labels, test_size=0.2, random_state=42,stratify=T
     split_path = artifacts_directory / f"{split_name}.json"
 
     if split_path.exists():
-        data = json.load(split_path.read_text(encoding="utf-8"))
+        data = json.loads(split_path.read_text(encoding="utf-8"))
         return np.array(data["train_idx"]), np.array(data["test_idx"])
 
     index = np.arange(len(labels))
