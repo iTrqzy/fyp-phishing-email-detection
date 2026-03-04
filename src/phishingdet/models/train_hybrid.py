@@ -1,6 +1,8 @@
 import json
 from datetime import datetime
 import joblib
+import csv
+import time
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
@@ -43,6 +45,59 @@ def get_text_probabilities(train_texts, train_labels, valid_texts, max_features 
     probs = model.predict_proba(X_valid)[:, 1]
     return probs
 
+# AI GENERATED FOR DATA COLLECTION
+def save_error_analysis_csv_stage3(
+    output_path,
+    texts,
+    y_true,
+    y_pred,
+    hybrid_prob,
+    text_prob,
+    metadata_prob,
+    top_k=50,
+):
+    """
+    Saves the most confident misclassifications:
+      - False positives: y_true=0, y_pred=1 (sorted by hybrid_prob desc)
+      - False negatives: y_true=1, y_pred=0 (sorted by hybrid_prob asc)
+
+    Columns:
+      error_type, true_label, pred_label, hybrid_prob, text_prob, metadata_prob, text_snippet
+    """
+    rows_fp = []
+    rows_fn = []
+
+    for i in range(len(texts)):
+        yt = int(y_true[i])
+        yp = int(y_pred[i])
+        hp = float(hybrid_prob[i])
+        tp = float(text_prob[i])
+        mp = float(metadata_prob[i])
+
+        if yt == 0 and yp == 1:  # false positive
+            rows_fp.append((hp, yt, yp, hp, tp, mp, texts[i]))
+        elif yt == 1 and yp == 0:  # false negative
+            rows_fn.append((hp, yt, yp, hp, tp, mp, texts[i]))
+
+    # Most confident FP = highest hybrid_prob
+    rows_fp.sort(key=lambda r: r[0], reverse=True)
+    # Most confident FN = lowest hybrid_prob (most confident "legit")
+    rows_fn.sort(key=lambda r: r[0])
+
+    # Keep top_k from each category (keeps file manageable)
+    out_rows = []
+    for r in rows_fp[:top_k]:
+        out_rows.append(("false_positive", r[1], r[2], r[3], r[4], r[5], r[6][:400]))
+    for r in rows_fn[:top_k]:
+        out_rows.append(("false_negative", r[1], r[2], r[3], r[4], r[5], r[6][:400]))
+
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            ["error_type", "true_label", "pred_label", "hybrid_prob", "text_prob", "metadata_prob", "text_snippet"]
+        )
+        writer.writerows(out_rows)
+
 def get_metadata_probabilities(train_texts, train_labels, valid_texts):
     # Training Stage 2 model (DictVectorizer + Logistic Regression) on this fold
     vectorizer, X_train =  fit_metadata_vectorizer(train_texts)
@@ -60,12 +115,23 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
     texts = df["text"].tolist()
     labels = df["label"].tolist()
 
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    # Turn this OFF later if you don't want to export runtime + best-threshold metrics + error analysis.
+    ENABLE_REPORTING_EXTRAS = True
+
+    t0_total = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t0_split = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
     train_idx, test_idx = get_or_make_split_indicies(
         labels,
-        test_size = test_size,
-        random_state= RANDOM_STATE,
-        stratify = True,
-        split_name = "phishing_email_split_1",
+        test_size=test_size,
+        random_state=RANDOM_STATE,
+        stratify=True,
+        split_name="phishing_email_split_1",
     )
 
     x_train_text = [texts[i] for i in train_idx]
@@ -74,19 +140,26 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
     x_test_text = [texts[i] for i in test_idx]
     y_test = np.array([labels[i] for i in test_idx])
 
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t_split = time.perf_counter() - t0_split if ENABLE_REPORTING_EXTRAS else None
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
     # out of fold probabilities for meta learner
     oof_text_probability = np.zeros(len(x_train_text), dtype=float)
     oof_metadata_probability = np.zeros(len(x_train_text), dtype=float)
 
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=RANDOM_STATE)
 
-    for fold_num, (train_rows, valid_rows) in enumerate(skf.split(x_train_text, y_train), start=1):
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t0_oof = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
+    for fold_num, (train_rows, valid_rows) in enumerate(skf.split(x_train_text, y_train), start=1):
         fold_train_texts = [x_train_text[i] for i in train_rows]
         fold_train_labels = y_train[train_rows]
         fold_valid_texts = [x_train_text[i] for i in valid_rows]
 
-        # Retrieves the probabilities from each base model on the validation fold
+        # base model probabilities on the validation fold (OOF)
         text_probability = get_text_probabilities(fold_train_texts, fold_train_labels, fold_valid_texts)
         metadata_probability = get_metadata_probabilities(fold_train_texts, fold_train_labels, fold_valid_texts)
 
@@ -94,22 +167,34 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
             oof_text_probability[row_index] = float(text_probability[j])
             oof_metadata_probability[row_index] = float(metadata_probability[j])
 
-    # Training the meta learner using only the OOF probabilities
-    meta_train_features = []
-    for i in range(len(oof_text_probability)):
-        meta_train_features.append([oof_text_probability[i], oof_metadata_probability[i]])
-    meta_train_features = np.array(meta_train_features)
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t_oof = time.perf_counter() - t0_oof if ENABLE_REPORTING_EXTRAS else None
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
+    # Train meta learner ONLY on OOF probabilities
+    meta_train_features = np.column_stack([oof_text_probability, oof_metadata_probability])
+
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t0_meta = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
     meta_model = LogisticRegression(max_iter=1000)
     meta_model.fit(meta_train_features, y_train)
 
-    # Train final base model on the full training split
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t_meta = time.perf_counter() - t0_meta if ENABLE_REPORTING_EXTRAS else None
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
+    # Train final base models on full training split
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t0_final = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
     final_text_vectorizer, X_train_text = fit_vectorizer(x_train_text, max_features=5000)
     X_test_text = transform_vectorizer(final_text_vectorizer, x_test_text)
 
     final_text_model = LogisticRegression(max_iter=1000)
     final_text_model.fit(X_train_text, y_train)
-
     test_text_probability = final_text_model.predict_proba(X_test_text)[:, 1]
 
     final_metadata_vectorizer, X_train_meta = fit_metadata_vectorizer(x_train_text)
@@ -117,24 +202,27 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
 
     final_metadata_model = LogisticRegression(max_iter=1000)
     final_metadata_model.fit(X_train_meta, y_train)
-
     test_metadata_probability = final_metadata_model.predict_proba(X_test_meta)[:, 1]
 
-    # Hybrid prediction on the test set (combining both meta model)
-    meta_test_features = []
-    for i in range(len(test_text_probability)):
-        meta_test_features.append([float(test_text_probability[i]), float(test_metadata_probability[i])])
-    meta_test_features = np.array(meta_test_features)
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t_final = time.perf_counter() - t0_final if ENABLE_REPORTING_EXTRAS else None
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
+    # Hybrid (meta) prediction on the test set
+    meta_test_features = np.column_stack([test_text_probability.astype(float), test_metadata_probability.astype(float)])
     hybrid_probability = meta_model.predict_proba(meta_test_features)[:, 1]
+
+    # Default threshold evaluation (0.5)
     preds = (hybrid_probability > 0.5).astype(int)
 
-    # Evaluation
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t0_eval = time.perf_counter()
+    # ===== END OPTIONAL REPORTING BLOCK =====
+
     accuracy = float(accuracy_score(y_test, preds))
     precision = float(precision_score(y_test, preds, zero_division=0))
     recall = float(recall_score(y_test, preds, zero_division=0))
     f1 = float(f1_score(y_test, preds, zero_division=0))
-
     cm = confusion_matrix(y_test, preds)
 
     roc_auc = None
@@ -145,6 +233,35 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
 
     best_threshold, best_f1 = best_threshold_by_f1(y_test, hybrid_probability)
 
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    t_eval = time.perf_counter() - t0_eval if ENABLE_REPORTING_EXTRAS else None
+
+    # Save best-threshold metrics (so your report can cite them properly)
+    best_threshold_metrics = None
+    if ENABLE_REPORTING_EXTRAS and best_threshold is not None:
+        best_preds = (hybrid_probability > best_threshold).astype(int)
+        best_cm = confusion_matrix(y_test, best_preds).tolist()
+        best_threshold_metrics = {
+            "threshold": float(best_threshold),
+            "precision": float(precision_score(y_test, best_preds, zero_division=0)),
+            "recall": float(recall_score(y_test, best_preds, zero_division=0)),
+            "f1": float(f1_score(y_test, best_preds, zero_division=0)),
+            "confusion_matrix": best_cm,
+        }
+
+    # Runtime breakdown
+    runtime_seconds = None
+    if ENABLE_REPORTING_EXTRAS:
+        t_total = time.perf_counter() - t0_total
+        runtime_seconds = {
+            "split_s": float(t_split) if t_split is not None else None,
+            "oof_cv_s": float(t_oof) if t_oof is not None else None,
+            "meta_train_s": float(t_meta) if t_meta is not None else None,
+            "final_base_train_s": float(t_final) if t_final is not None else None,
+            "eval_s": float(t_eval) if t_eval is not None else None,
+            "total_s": float(t_total),
+        }
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
     print("##### STAGE 3 (HYBRID STACKING) EVALUATION #####")
     print("Accuracy :", round(accuracy, 3))
@@ -152,16 +269,13 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
     print("Recall   :", round(recall, 3))
     print("F1       :", round(f1, 3))
     print()
-
     print("ROC AUC:", None if roc_auc is None else round(roc_auc, 3))
     print("PR  AUC:", None if pr_auc is None else round(pr_auc, 3))
     print("Best threshold (F1):", best_threshold, "| F1:", round(best_f1, 3))
     print()
-
     print("Confusion matrix:")
     print(cm)
     print()
-
     print("Classification report:")
     print(classification_report(y_test, preds, zero_division=0))
     print()
@@ -178,6 +292,22 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
 
     joblib.dump(meta_model, artifacts_directory / "meta_model.joblib")
 
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    # Save error analysis (top confident FP/FN) for the dissertation
+    if ENABLE_REPORTING_EXTRAS:
+        error_path = artifacts_directory / "error_analysis.csv"
+        save_error_analysis_csv_stage3(
+            error_path,
+            x_test_text,
+            y_test,
+            preds,
+            hybrid_probability,
+            test_text_probability,
+            test_metadata_probability,
+            top_k=50,
+        )
+        print("Saved error analysis to:", error_path)
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
     # Save results JSON (latest + timestamped)
     results = {
@@ -204,6 +334,12 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
             "intercept": float(meta_model.intercept_[0]),
         }
     }
+
+    # ===== OPTIONAL REPORTING BLOCK (KEEP FOR WRITE-UP) =====
+    if ENABLE_REPORTING_EXTRAS:
+        results["runtime_seconds"] = runtime_seconds
+        results["best_threshold_metrics"] = best_threshold_metrics
+    # ===== END OPTIONAL REPORTING BLOCK =====
 
     latest_file = artifacts_directory / "results.json"
     latest_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
