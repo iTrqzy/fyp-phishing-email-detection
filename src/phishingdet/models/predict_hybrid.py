@@ -1,10 +1,13 @@
 import argparse
 from pathlib import Path
 import joblib
+import re
+import csv
 
 from phishingdet.data.loader import repo_root
 from phishingdet.features.build_features import transform_vectorizer
 from phishingdet.features.build_metadata_features import transform_metadata_vectorizer
+from phishingdet.features.build_metadata_features import extract_metadata_features_one
 
 
 def load_stage3_artifacts():
@@ -41,6 +44,43 @@ def load_stage3_artifacts():
 
     return text_model, text_vectorizer, metadata_model, metadata_vectorizer, meta_model
 
+def stage1_top_features_csv():
+    feature_path = repo_root() / "artifacts" / "top_features.csv"
+    # print("Stage1 top_features path:", feature_path)
+    if feature_path.exists():
+        return feature_path
+    return None
+
+def load_top_features(csv_path, top_n_each=15):
+    rows = []
+    top_phishing = []
+    top_legit = []
+    feature_weights = {}
+
+    with open(csv_path, "r", encoding="utf-8") as f:
+        data = csv.DictReader(f)
+        for row in data:
+            feature = (row.get("feature" or "").strip())
+            if feature:
+                weight = float(row["weight"])
+                rows.append((feature, weight))
+
+        for feature, weight in rows:
+            if weight > 0:
+                top_phishing.append((feature,weight))
+            elif weight < 0:
+                top_legit.append((feature,weight))
+
+    top_phishing.sort(key=lambda item: item[1], reverse=True) # biggest positive first
+    top_legit.sort(key=lambda item: item[1]) # most negative first
+
+    top_phishing = top_phishing[:top_n_each]
+    top_legit = top_legit[:top_n_each]
+
+    for feature, weight in top_phishing + top_legit:
+        feature_weights[feature] = weight
+
+    return feature_weights
 
 def predict_hybrid(text, threshold=0.5):
     text_model, text_vectorizer, metadata_model, metadata_vectorizer, meta_model = load_stage3_artifacts()
