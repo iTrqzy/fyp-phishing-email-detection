@@ -5,7 +5,6 @@ from datetime import datetime
 import joblib
 import numpy as np
 import pandas as pd
-import time
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -374,7 +373,7 @@ def train_metadata_model(test_size=0.2):
     )
 
     # DOCUMENTATION
-    top_features_path = artifacts_directory / "top_features.csv"
+    top_features_path = artifacts_directory / "top_features_stage2_metadata.csv"
     save_top_features(vectorizer, model, top_features_path, top_n=15)
 
     print(f"Saved features to {top_features_path}\n")
