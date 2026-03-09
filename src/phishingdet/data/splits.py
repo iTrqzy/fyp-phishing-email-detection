@@ -7,7 +7,7 @@ from phishingdet.data.loader import repo_root
 # Ensures that Stage 1, Stage 2, & Stage 3 are all tested on the exact rows
 
 # THE USE OF AI WAS USED HERE TO HELP MAKE THIS FUNCTION
-def get_or_make_split_indicies(labels, test_size=0.2, random_state=42,stratify=True,
+def get_or_make_split_indices(labels, test_size=0.2, random_state=42,stratify=True,
                                split_name="split_1"):
     artifacts_directory = repo_root()/"artifacts"/"splits"
     artifacts_directory.mkdir(parents=True, exist_ok=True)

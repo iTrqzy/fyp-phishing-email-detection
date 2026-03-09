@@ -12,7 +12,7 @@ from sklearn.metrics import (
     roc_auc_score, average_precision_score
 )
 from phishingdet.data.loader import load_email, repo_root, dataset_path
-from phishingdet.data.splits import get_or_make_split_indicies
+from phishingdet.data.splits import get_or_make_split_indices
 from phishingdet.features.build_features import fit_vectorizer, transform_vectorizer
 from phishingdet.features.build_metadata_features import fit_metadata_vectorizer, transform_metadata_vectorizer
 
@@ -126,13 +126,8 @@ def train_hybrid_stack(test_size=0.2, n_folds=5):
     t0_split = time.perf_counter()
     # ===== END OPTIONAL REPORTING BLOCK =====
 
-    train_idx, test_idx = get_or_make_split_indicies(
-        labels,
-        test_size=test_size,
-        random_state=RANDOM_STATE,
-        stratify=True,
-        split_name="phishing_email_split_1",
-    )
+    train_idx, test_idx = get_or_make_split_indices(labels, test_size=test_size, random_state=RANDOM_STATE,
+                                                    stratify=True, split_name="phishing_email_split_1")
 
     x_train_text = [texts[i] for i in train_idx]
     y_train = np.array([labels[i] for i in train_idx])
