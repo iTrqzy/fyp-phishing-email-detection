@@ -1,106 +1,53 @@
 import json
-import csv
-import random
+import time
 from datetime import datetime
+from pathlib import Path
 
 import joblib
+import numpy as np
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    classification_report,
-    roc_auc_score,
-    average_precision_score,
-    balanced_accuracy_score,
-    matthews_corrcoef,
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, classification_report,
+    roc_auc_score, average_precision_score,
 )
 
 from phishingdet.data.loader import load_email, repo_root, dataset_path
 from phishingdet.features.build_features import fit_vectorizer, transform_vectorizer
+from phishingdet.evaluation.eval_utils import save_stage1_test_preds_csv
 
 
-def save_top_features(vectorizer, model, artifacts_dir, top_n=20):
-    feature_names = vectorizer.get_feature_names_out()
-    coefs = model.coef_[0]  # binary classifier -> 1 row
+def best_threshold_by_f1(y_true, prob):
+    # Try thresholds from 0.00 -> 1.00
+    thresholds = np.arange(0.0, 1.01, 0.01)
 
-    top_pos_idx = coefs.argsort()[-top_n:][::-1]  # phishing (label=1)
-    top_neg_idx = coefs.argsort()[:top_n]         # legit (label=0)
+    best_threshold = 0.50
+    best_f1_score = -1.0
 
-    out_path = artifacts_dir / "top_features.csv"
-
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["rank", "class_hint", "feature", "coefficient"])
-
-        rank = 1
-        for i in top_pos_idx:
-            writer.writerow([rank, "phishing (label=1)", feature_names[i], float(coefs[i])])
-            rank += 1
-
-        rank = 1
-        for i in top_neg_idx:
-            writer.writerow([rank, "legit (label=0)", feature_names[i], float(coefs[i])])
-            rank += 1
-
-    print("\n##### DOCUMENTATION: TOP FEATURES #####")
-    print(f"Saved top features to: {out_path}")
-    print("Top tokens pushing towards PHISHING (label=1):")
-    for i in top_pos_idx[:10]:
-        print(" ", feature_names[i], "->", round(float(coefs[i]), 4))
-    print("Top tokens pushing towards LEGIT (label=0):")
-    for i in top_neg_idx[:10]:
-        print(" ", feature_names[i], "->", round(float(coefs[i]), 4))
-    print("##### END DOCUMENTATION #####\n")
-
-
-def best_threshold_by_f1(y_true, probs):
-    # Scan a few thresholds and pick the one with best F1 on the test set
-    best_t = 0.5
-    best_f1 = -1.0
-
-    for t in [i / 100 for i in range(10, 91, 5)]:
-        preds = [1 if p >= t else 0 for p in probs]
+    for threshold in thresholds:
+        preds = (prob >= threshold).astype(int)
         score = f1_score(y_true, preds, zero_division=0)
-        if score > best_f1:
-            best_f1 = score
-            best_t = t
 
-    return best_t, best_f1
+        if score > best_f1_score:
+            best_f1_score = float(score)
+            best_threshold = float(threshold)
 
-
-def label_shuffle_sanity_check(x_train, y_train, x_test, y_test, random_state=42):
-    # If this gets high accuracy, something is suspicious (leakage / trivial patterns)
-    rng = random.Random(random_state)
-    y_shuffled = list(y_train)
-    rng.shuffle(y_shuffled)
-
-    model = LogisticRegression(max_iter=1000)
-    model.fit(x_train, y_shuffled)
-    preds = model.predict(x_test)
-
-    acc = accuracy_score(y_test, preds)
-    return float(acc)
+    return best_threshold, best_f1_score
 
 
 def train_model(test_size=0.2, random_state=42, max_features=5000):
-    # load the data
+    # load the data and make it into a list form
     df = load_email()
     texts = df["text"].tolist()
     labels = df["label"].tolist()
 
-    # where to save artifacts
-    artifacts_dir = repo_root() / "artifacts"
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-
-    # stratify keeps class balance in train/test
+    # if dataset is very small, there is a failsafe
+    # stratify tries to keep the same class balance in train and test
     use_stratify = len(set(labels)) > 1 and len(labels) >= 6
 
-    # split
+    # split training & testing
     x_train_text, x_test_text, y_train, y_test = train_test_split(
         texts,
         labels,
@@ -109,178 +56,149 @@ def train_model(test_size=0.2, random_state=42, max_features=5000):
         stratify=labels if use_stratify else None
     )
 
-    # vectorize
-    vectorizer, x_train = fit_vectorizer(x_train_text, max_features=max_features)
-    x_test = transform_vectorizer(vectorizer, x_test_text)
+    # converting text to numbers
+    vectorizer, X_train = fit_vectorizer(x_train_text, max_features=max_features)
+    X_test = transform_vectorizer(vectorizer, x_test_text)
 
-    # train
+    # train model
     model = LogisticRegression(max_iter=1000)
-    model.fit(x_train, y_train)
+    model.fit(X_train, y_train)
 
-    ##### DOCUMENTATION: TOP FEATURES #####
-    save_top_features(vectorizer, model, artifacts_dir, top_n=20)
-    ##### END DOCUMENTATION #####
+    # outcomes (default 0/1)
+    preds_0_5 = model.predict(X_test)
 
-    # predict
-    predictions = model.predict(x_test)
-
-    # ------------------------------------------------------------
-    # METRICS (INCLUDING IMBALANCE-AWARE METRICS)
-    # ------------------------------------------------------------
-    # Many email datasets are imbalanced (e.g., far more phishing than legit, or vice versa).
-    # In imbalanced settings, Accuracy can look "great" even for a weak model.
-    # This reports additional metrics that stay informative when classes are skewed.
-
-    # 1) Majority-class baseline accuracy
-    # "What accuracy would we get if we predicted the most common class every time?"
-    # This is a sanity-check baseline: the model should beat this clearly.
-    majority_label = 1 if sum(y_test) > (len(y_test) / 2) else 0
-    majority_baseline_acc = sum(1 for y in y_test if y == majority_label) / len(y_test)
-
-    # 2) Balanced Accuracy
-    # This averages recall across classes, so each class contributes equally.
-    # Useful when one class dominates (prevents inflated performance reporting).
-    bal_acc = balanced_accuracy_score(y_test, predictions)
-
-    # 3) Matthews Correlation Coefficient (MCC)
-    # A robust single-number score for binary classification in [-1, 1]:
-    #   1.0 = perfect prediction
-    #   0.0 = random / no better than chance
-    #  -1.0 = perfectly wrong
-    # MCC is widely used because it remains reliable under class imbalance.
-    mcc = matthews_corrcoef(y_test, predictions)
-
-    # Standard metrics
-    accuracy = accuracy_score(y_test, predictions)
-    precision = precision_score(y_test, predictions, zero_division=0)
-    recall = recall_score(y_test, predictions, zero_division=0)
-    f1 = f1_score(y_test, predictions, zero_division=0)
+    accuracy = float(accuracy_score(y_test, preds_0_5))
+    precision = float(precision_score(y_test, preds_0_5, zero_division=0))
+    recall = float(recall_score(y_test, preds_0_5, zero_division=0))
+    f1 = float(f1_score(y_test, preds_0_5, zero_division=0))
 
     print("Model evaluation:")
     print("  Accuracy :", round(accuracy, 3))
     print("  Precision:", round(precision, 3))
     print("  Recall   :", round(recall, 3))
     print("  F1 Score :", round(f1, 3))
+    print()
 
-    print("  Majority-class baseline accuracy:", round(majority_baseline_acc, 3))
-    print("  Balanced accuracy:", round(bal_acc, 3))
-    print("  MCC:", round(mcc, 3))
-
-    ##### DOCUMENTATION OUTPUT START #####
-    print("\nDataset info:")
-    print("  Dataset path:", str(dataset_path()))
+    print("Dataset info:")
+    print("  Dataset path:", dataset_path())
     print("  Total rows:", len(df))
     print("  Label counts:")
     print(df["label"].value_counts())
+    print()
 
-    print("\nSplit info:")
+    print("Split info:")
     print("  Train size:", len(y_train))
     print("  Test size :", len(y_test))
     print("  test_size :", test_size)
+    print()
 
-    cm = confusion_matrix(y_test, predictions)
-    print("\nConfusion matrix:")
+    cm = confusion_matrix(y_test, preds_0_5)
+    print("Confusion matrix:")
     print(cm)
+    print()
 
-    print("\nClassification report:")
-    print(classification_report(y_test, predictions, zero_division=0))
+    print("Classification report:")
+    print(classification_report(y_test, preds_0_5, zero_division=0))
+    print()
 
-    auc = None
+    # probabilities + extra metrics
+    roc_auc = None
     pr_auc = None
-    probs = None
+    best_t = None
+    best_f1_at_t = None
 
     if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(x_test)[:, 1].tolist()
+        prob = model.predict_proba(X_test)[:, 1]
+        roc_auc = float(roc_auc_score(y_test, prob))
+        pr_auc = float(average_precision_score(y_test, prob))
+        best_t, best_f1_at_t = best_threshold_by_f1(np.array(y_test), prob)
 
-        # ROC-AUC
-        try:
-            auc = roc_auc_score(y_test, probs)
-            print("  ROC-AUC  :", round(auc, 3))
-        except Exception as e:
-            print("  ROC-AUC  : could not compute")
-            print("           ", str(e))
+        print("ROC-AUC :", round(roc_auc, 3))
+        print("PR-AUC  :", round(pr_auc, 3))
+        print("Best threshold (F1):", best_t, "| F1:", round(best_f1_at_t, 3))
+        print()
 
-        # PR-AUC (Average Precision)
-        try:
-            pr_auc = average_precision_score(y_test, probs)
-            print("  PR-AUC   :", round(pr_auc, 3))
-        except Exception as e:
-            print("  PR-AUC   : could not compute")
-            print("           ", str(e))
+        preds_best = (prob >= best_t).astype(int)
 
-        # Best threshold scan
-        best_t, best_f1 = best_threshold_by_f1(y_test, probs)
-        print("  Best threshold (by F1 on test):", best_t, "| F1:", round(best_f1, 3))
-
-        # Label-shuffle sanity check
-        shuffle_acc = label_shuffle_sanity_check(x_train, y_train, x_test, y_test, random_state=random_state)
-        print("  Label-shuffle accuracy (sanity check):", round(shuffle_acc, 3))
-    else:
-        best_t, best_f1 = None, None
-        shuffle_acc = None
-        print("  Probabilities: not available (model has no predict_proba)")
-
-    ##### DOCUMENTATION OUTPUT END #####
+        # save per-sample test probabilities for plots
+        stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        out_name = f"stage1_test_preds_{stamp}.csv"
+        out_path = save_stage1_test_preds_csv(
+            repo_root,
+            out_name=out_name,
+            y_true=np.array(y_test),
+            prob=prob,
+            pred_0_5=np.array(preds_0_5),
+            pred_best=np.array(preds_best),
+            threshold_best=best_t,
+        )
+        # also overwrite a “latest”
+        save_stage1_test_preds_csv(
+            repo_root,
+            out_name="stage1_test_preds.csv",
+            y_true=np.array(y_test),
+            prob=prob,
+            pred_0_5=np.array(preds_0_5),
+            pred_best=np.array(preds_best),
+            threshold_best=best_t,
+        )
+        print("Saved Stage 1 test preds to:", out_path)
+        print()
 
     # save artifacts
+    artifacts_dir = repo_root() / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
     model_path = artifacts_dir / "model.joblib"
     vec_path = artifacts_dir / "vectorizer.joblib"
 
     joblib.dump(model, model_path)
     joblib.dump(vectorizer, vec_path)
 
-    print(f"\nSaved model to: {model_path}")
-    print(f"Saved vectorizer to: {vec_path}")
+    print("Saved model to:", model_path)
+    print("Saved vectorizer to:", vec_path)
 
-    ##### DOCUMENTATION SAVE START #####
+    # save results.json (keep it simple)
     results = {
+        "stage": "stage1_text_only",
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "dataset_path": str(dataset_path()),
-        "dataset_rows": int(len(df)),
+        "rows": int(len(df)),
         "label_counts": df["label"].value_counts().to_dict(),
-        "train_size": int(len(y_train)),
-        "test_size": int(len(y_test)),
-        "test_size_ratio": float(test_size),
-        "random_state": int(random_state),
-        "use_stratify": bool(use_stratify),
+        "split": {
+            "train_size": int(len(y_train)),
+            "test_size": int(len(y_test)),
+            "test_size_ratio": float(test_size),
+            "random_state": int(random_state),
+            "use_stratify": bool(use_stratify),
+        },
         "vectorizer": {
             "type": "tfidf",
             "max_features": int(max_features),
             "ngram_range": [1, 2],
-            "stop_words": "english",
-        },
-        "model": {
-            "type": "logistic_regression",
-            "max_iter": 1000,
         },
         "metrics": {
-            "accuracy": float(accuracy),
-            "precision": float(precision),
-            "recall": float(recall),
-            "f1": float(f1),
-            "roc_auc": float(auc) if auc is not None else None,
-            "pr_auc": float(pr_auc) if pr_auc is not None else None,
-            "best_threshold_f1": float(best_t) if best_t is not None else None,
-            "label_shuffle_accuracy": float(shuffle_acc) if shuffle_acc is not None else None,
-            "majority_baseline_accuracy": float(majority_baseline_acc),
-            "balanced_accuracy": float(bal_acc),
-            "mcc": float(mcc),
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "roc_auc": roc_auc,
+            "pr_auc": pr_auc,
+            "best_threshold_f1": best_t,
+            "best_f1_at_threshold": best_f1_at_t,
         },
         "confusion_matrix": cm.tolist(),
     }
 
     latest_path = artifacts_dir / "results.json"
-    with open(latest_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+    latest_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    ts = results["timestamp"].replace(":", "-")  # Windows-safe filename
-    run_path = artifacts_dir / f"results_{ts}.json"
-    with open(run_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    run_path = artifacts_dir / f"results_{stamp}.json"
+    run_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    print(f"Saved latest results to: {latest_path}")
-    print(f"Saved run results to: {run_path}")
-    ##### DOCUMENTATION SAVE END #####
+    print("Saved latest results to:", latest_path)
+    print("Saved run results to:", run_path)
 
 
 if __name__ == "__main__":
