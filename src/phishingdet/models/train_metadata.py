@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 
 import joblib
@@ -26,7 +27,7 @@ def save_top_features(vectorizer, model, out_path, top_n=15):
     coefficients = model.coef_[0]
 
     sorted_indices = np.argsort(coefficients)
-    legit_indices = sorted_indices[:top_n]              # most negative
+    legit_indices = sorted_indices[:top_n]               # most negative
     phishing_indices = sorted_indices[-top_n:][::-1]    # most positive
 
     lines = ["direction,feature,weight"]
@@ -127,6 +128,8 @@ def label_shuffle_sanity_check(X_train, y_train, X_test, y_test, random_state=42
 
 
 def train_metadata_model(test_size=0.2, random_state=42, max_iter=1000):
+    total_start_time = time.perf_counter()
+
     df = load_email()
     texts = df["text"].tolist()
     labels = df["label"].tolist()
@@ -200,7 +203,7 @@ def train_metadata_model(test_size=0.2, random_state=42, max_iter=1000):
         print("Best threshold (F1):", best_t, "| F1:", round(best_f1_at_t, 3))
         print()
 
-        # ===== export test preds for PR/ROC curves (Stage 2) =====
+        # export test predictions for PR/ROC curves (Stage 2)
         pred_0_5 = (probs > 0.5).astype(int)
         pred_best = (probs > best_t).astype(int) if best_t is not None else None
 
@@ -244,6 +247,8 @@ def train_metadata_model(test_size=0.2, random_state=42, max_iter=1000):
     print("Saved features to", top_features_path)
     print()
 
+    total_runtime_seconds = float(time.perf_counter() - total_start_time)
+
     results = {
         "stage": "stage2_metadata_only",
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -270,6 +275,9 @@ def train_metadata_model(test_size=0.2, random_state=42, max_iter=1000):
         },
         "confusion_matrix": cm.tolist(),
         "number_of_features": int(len(vectorizer.get_feature_names_out())),
+        "runtime_seconds": {
+            "total": total_runtime_seconds
+        },
     }
 
     latest_file = artifacts_directory / "results.json"
