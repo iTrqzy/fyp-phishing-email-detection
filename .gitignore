@@ -207,12 +207,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-data/raw/
+# data directories
+# Keep most data out of git, but allow the main dataset needed to run the project.
+data/raw/*
+!data/raw/
+!data/raw/Phishing_Email.csv
+# Optional secondary dataset stays ignored unless you explicitly want to version it.
+# !data/raw/sample_emails_50k.csv
+
 data/interim/
 data/processed/
-data/raw/Phishing_Email.
-
-# datasets
 
 # training outputs
 artifacts/
