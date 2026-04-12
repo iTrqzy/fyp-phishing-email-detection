@@ -1,162 +1,107 @@
-import json
-
-import matplotlib.pyplot as plt
-import numpy as np
+from pathlib import Path
 import pandas as pd
-from sklearn.calibration import calibration_curve
-from sklearn.metrics import brier_score_loss
 
-from phishingdet.data.loader import repo_root
+# Numeric labels used across the project
+PHISHING_LABEL = 1
+LEGIT_LABEL = 0
 
 
-STAGE_FILES = {
-    "stage1": "stage1_test_preds.csv",
-    "stage2": "stage2_test_preds.csv",
-    "stage3": "stage3_test_preds.csv",
-}
 
-def calculate_expected_calibration_error(true_labels, predicted_probabilities, number_of_bins=10):
+DATASET_FILENAME = "Phishing_Email.csv"
 
-    # Calculate Expected Calibration Error (ECE).
-    # ECE measures how close the predicted probabilities are to the
-    # actual observed frequencies.
 
-    true_labels = np.asarray(true_labels, dtype=int)
-    predicted_probabilities = np.asarray(predicted_probabilities, dtype=float)
 
-    bin_edges = np.linspace(0.0, 1.0, number_of_bins + 1)
-    probability_bin_indices = np.digitize(predicted_probabilities, bin_edges[1:-1], right=True)
+def repo_root():
+    return Path(__file__).resolve().parents[3]
 
-    expected_calibration_error_value = 0.0
-    per_bin_summary = []
 
-    for calibration_bin_index in range(number_of_bins):
-        in_this_bin = probability_bin_indices == calibration_bin_index
-        samples_in_bin = int(in_this_bin.sum())
+def dataset_path():
+    return repo_root() / "data" / "raw" / DATASET_FILENAME
 
-        if samples_in_bin == 0:
-            per_bin_summary.append(
-                {
-                    "bin_index": int(calibration_bin_index),
-                    "sample_count": 0,
-                    "average_predicted_probability": None,
-                    "observed_positive_rate": None,
-                    "absolute_difference": None,
-                }
-            )
-            continue
 
-        average_predicted_probability = float(predicted_probabilities[in_this_bin].mean())
-        observed_positive_rate = float(true_labels[in_this_bin].mean())
-        absolute_difference = abs(observed_positive_rate - average_predicted_probability)
+def load_email():
+    path = dataset_path()
+    df = pd.read_csv(path)
 
-        expected_calibration_error_value += (samples_in_bin / len(predicted_probabilities)) * absolute_difference
+    # Case 1:
+    # Dataset already uses the expected schema: columns named "text" and "label"
+    if {"text", "label"}.issubset(df.columns):
+        # Keep only the required columns
+        df = df[["text", "label"]].copy()
 
-        per_bin_summary.append(
-            {
-                "bin_index": int(calibration_bin_index),
-                "sample_count": samples_in_bin,
-                "average_predicted_probability": average_predicted_probability,
-                "observed_positive_rate": observed_positive_rate,
-                "absolute_difference": absolute_difference,
-            }
-        )
+        # Ensure text is stored as clean strings
+        df["text"] = df["text"].astype(str).str.strip()
 
-    return float(expected_calibration_error_value), per_bin_summary
+        # Ensure label is numeric
+        df["label"] = df["label"].astype(int)
 
-def load_prediction_file(csv_filename):
-    # Load one prediction CSV from artifacts/eval.
+    # Case 2:
+    # Dataset uses alternative column names: "Email Text" and "Email Type"
+    elif {"Email Text", "Email Type"}.issubset(df.columns):
+        # Keep only the required columns
+        df = df[["Email Text", "Email Type"]].copy()
 
-    csv_path = repo_root() / "artifacts" / "eval" / csv_filename
+        # Rename them into the standard schema expected by the rest of the project
+        df = df.rename(columns={"Email Text": "text", "Email Type": "label"})
 
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Missing prediction CSV: {csv_path}")
+        # Clean text column
+        df["text"] = df["text"].astype(str).str.strip()
 
-    prediction_dataframe = pd.read_csv(csv_path)
+        # Clean label column and normalize to lowercase for easier matching
+        df["label"] = df["label"].astype(str).str.strip().str.lower()
 
-    required_columns = {"y_true", "prob"}
-    missing_columns = required_columns - set(prediction_dataframe.columns)
-
-    if missing_columns:
-        raise ValueError(
-            f"{csv_path.name} is missing columns: {sorted(missing_columns)}"
-        )
-
-    return prediction_dataframe, csv_path
-
-def main():
-    output_directory = repo_root() / "artifacts" / "eval"
-    output_directory.mkdir(parents=True, exist_ok=True)
-
-    calibration_plot_path = output_directory / "calibration.png"
-    calibration_metrics_path = output_directory / "calibration_metrics.json"
-
-    calibration_results = {}
-
-    # Creating the plots
-    plt.figure(figsize=(8, 6))
-    plt.plot([0, 1], [0, 1], linestyle="--", label="Perfect calibration")
-
-    for stage_name, csv_filename in STAGE_FILES.items():
-        prediction_dataframe, csv_path = load_prediction_file(csv_filename)
-
-        true_labels = prediction_dataframe["y_true"].astype(int).to_numpy()
-        predicted_probabilities = prediction_dataframe["prob"].astype(float).to_numpy()
-
-        brier_score_value = float(brier_score_loss(true_labels, predicted_probabilities))
-
-        expected_calibration_error_value, per_bin_summary = calculate_expected_calibration_error(
-            true_labels,
-            predicted_probabilities,
-            number_of_bins=10,
-        )
-
-        observed_positive_rates, average_predicted_probabilities = calibration_curve(
-            true_labels,
-            predicted_probabilities,
-            n_bins=10,
-            strategy="uniform",
-        )
-
-        calibration_results[stage_name] = {
-            "source_csv": str(csv_path),
-            "sample_count": int(len(prediction_dataframe)),
-            "brier_score": brier_score_value,
-            "expected_calibration_error": expected_calibration_error_value,
-            "per_bin_summary": per_bin_summary,
+        # Maps string label values to numeric 0/1 labels
+        mapping = {
+            "safe email": LEGIT_LABEL,
+            "legit email": LEGIT_LABEL,
+            "ham": LEGIT_LABEL,
+            "phishing email": PHISHING_LABEL,
+            "phishing": PHISHING_LABEL,
+            "spam": PHISHING_LABEL,
         }
 
-        plt.plot(
-            average_predicted_probabilities,
-            observed_positive_rates,
-            marker="o",
-            linewidth=2,
-            label=(
-                f"{stage_name.upper()} "
-                f"(Brier={brier_score_value:.4f}, "
-                f"ECE={expected_calibration_error_value:.4f})"
-            ),
+        # Replace string labels with numeric labels
+        df["label"] = df["label"].map(mapping)
+
+        # If some labels were not recognised by the mapping,
+        # show the most common original label values to help debugging
+        if df["label"].isna().any():
+            unknown = (
+                pd.read_csv(path)[["Email Type"]]
+                .astype(str) # Converts values to string
+                .dropna()["Email Type"] # Removes rows where values are missing
+                .str.strip() # Removes any spacing in the rows
+                .value_counts() # Counts how many times each label appears
+                .head(20) # Keeps the top 20 most common values
+            )
+            raise ValueError(
+                "Found label values that loader.py doesn't recognise.\n"
+                "Update the mapping dict.\n\n"
+                f"Top label values:\n{unknown}"
+            )
+
+        # Convert mapped labels to integers
+        df["label"] = df["label"].astype(int)
+
+    # If the CSV does not match either supported schema, raise an error
+    else:
+        raise ValueError(
+            "CSV schema not recognised. Expected either:\n"
+            "  - columns: text, label\n"
+            "  - columns: Email Text, Email Type\n\n"
+            f"Got columns:\n{list(df.columns)}"
         )
 
-    plt.title("Calibration / Reliability Curve (Test Set)")
-    plt.xlabel("Average Predicted Probability")
-    plt.ylabel("Observed Positive Rate")
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(calibration_plot_path, dpi=200)
-    plt.close()
 
-    calibration_metrics_path.write_text(
-        json.dumps(calibration_results, indent=2),
-        encoding="utf-8",
-    )
+    # Remove rows where text or label is missing
+    df = df.dropna(subset=["text", "label"])
 
-    print("Saved calibration plot to:", calibration_plot_path)
-    print("Saved calibration metrics to:", calibration_metrics_path)
+    # Remove rows where text is empty after cleaning
+    df = df[df["text"].str.len() > 0].copy()
 
+    # Remove duplicate email texts
+    # This helps reduce train/test leakage if the same email appears multiple times
+    df = df.drop_duplicates(subset=["text"]).reset_index(drop=True)
 
-if __name__ == "__main__":
-    main()
+    # Return the cleaned DataFrame
+    return df
