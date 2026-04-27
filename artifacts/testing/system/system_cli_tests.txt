@@ -1,0 +1,112 @@
+﻿=== SYSTEM CLI TESTS (03/09/2026 12:14:20) ===
+
+--- ST1: Phishing example (IP URL + click/free) ---
+Prediction: 1 | phishing_prob: 0.9996425770599364 | decision: phishing
+
+--- EXPLANATION ---
+Stage 3 (hybrid stacking): combines Stage 1 + Stage 2 probabilities
+Hybrid probability: 0.9996 | decision: phishing
+Base model probs  : text= 0.9778 | meta= 0.9745
+
+Top metadata cues present (weighted):
+  has_ip_url=1 (PHISHING) weight=3.4893
+  upper_ratio=0.08571428571428572 (PHISHING) weight=0.9268
+  url_count=1 (LEGIT) weight=-0.5822
+  exclam_count=3 (PHISHING) weight=0.3474
+  word_count=8 (LEGIT) weight=-0.0039
+  digit_count=4 (LEGIT) weight=-0.0032
+  char_len=56 (PHISHING) weight=0.0006
+
+All triggered metadata (non-zero):
+  url_count = 1
+  has_ip_url = 1
+  char_len = 56
+  word_count = 8
+  exclam_count = 3
+  digit_count = 4
+  upper_ratio = 0.08571428571428572
+
+Top text cues present (weighted):
+  click (PHISHING) weight=4.5964
+  free (PHISHING) weight=3.562
+-------------------
+
+ 
+--- ST2: Legit example (meeting/thanks) ---
+Prediction: 0 | phishing_prob: 0.00745396029214188 | decision: legit
+
+--- EXPLANATION ---
+Stage 3 (hybrid stacking): combines Stage 1 + Stage 2 probabilities
+Hybrid probability: 0.0075 | decision: legit
+Base model probs  : text= 0.0614 | meta= 0.503
+
+Top metadata cues present (weighted):
+  upper_ratio=0.04878048780487805 (PHISHING) weight=0.9268
+  exclam_count=1 (PHISHING) weight=0.3474
+  word_count=10 (LEGIT) weight=-0.0039
+  char_len=53 (PHISHING) weight=0.0006
+
+All triggered metadata (non-zero):
+  char_len = 53
+  word_count = 10
+  exclam_count = 1
+  upper_ratio = 0.04878048780487805
+
+Top text cues present (weighted):
+  thanks (LEGIT) weight=-4.1266
+-------------------
+
+ 
+--- ST3: Borderline example (should be UNCERTAIN) ---
+Prediction: 0 | phishing_prob: 0.4926294047345807 | decision: uncertain
+
+--- EXPLANATION ---
+Stage 3 (hybrid stacking): combines Stage 1 + Stage 2 probabilities
+Hybrid probability: 0.4926 | decision: uncertain
+Base model probs  : text= 0.4634 | meta= 0.4121
+
+Top metadata cues present (weighted):
+  upper_ratio=0.022222222222222223 (PHISHING) weight=0.9268
+  word_count=9 (LEGIT) weight=-0.0039
+  char_len=54 (PHISHING) weight=0.0006
+
+All triggered metadata (non-zero):
+  char_len = 54
+  word_count = 9
+  upper_ratio = 0.022222222222222223
+
+Top text cues present (weighted):
+  (none from top_features.csv matched this text)
+-------------------
+
+ 
+--- ST4: Robustness/paraphrase phishing check ---
+Prediction: 1 | phishing_prob: 0.9988210164427656 | decision: phishing
+
+--- EXPLANATION ---
+Stage 3 (hybrid stacking): combines Stage 1 + Stage 2 probabilities
+Hybrid probability: 0.9988 | decision: phishing
+Base model probs  : text= 0.8931 | meta= 0.928
+
+Top metadata cues present (weighted):
+  has_ip_url=1 (PHISHING) weight=3.4893
+  upper_ratio=0.038461538461538464 (PHISHING) weight=0.9268
+  url_count=1 (LEGIT) weight=-0.5822
+  word_count=12 (LEGIT) weight=-0.0039
+  digit_count=4 (LEGIT) weight=-0.0032
+  char_len=77 (PHISHING) weight=0.0006
+
+All triggered metadata (non-zero):
+  url_count = 1
+  has_ip_url = 1
+  char_len = 77
+  word_count = 12
+  digit_count = 4
+  upper_ratio = 0.038461538461538464
+
+Top text cues present (weighted):
+  free (PHISHING) weight=3.562
+-------------------
+
+
+=== END SYSTEM CLI TESTS ===

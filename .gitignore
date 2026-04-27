@@ -218,7 +218,10 @@ data/interim/
 data/processed/
 
 # training outputs
-artifacts/
+# training outputs
+artifacts/*
+!artifacts/testing/
+!artifacts/testing/**
 artifacts/system_information/cpu_windows.txt
 artifacts/system_information/env_pip_freeze_windows.txt
 artifacts/system_information/gpu_windows.txt

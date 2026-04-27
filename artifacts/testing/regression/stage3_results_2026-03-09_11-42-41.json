@@ -1,0 +1,61 @@
+{
+  "stage": "stage3_hybrid_stacking",
+  "timestamp": "2026-03-09T11:40:40",
+  "dataset_path": "F:\\GitHub\\fyp-phishing-email-detection\\data\\raw\\Phishing_Email.csv",
+  "split_name": "phishing_email_split_1",
+  "split": {
+    "train": 14018,
+    "test": 3505,
+    "test_size": 0.2
+  },
+  "n_folds": 5,
+  "metrics": {
+    "accuracy": 0.9771754636233951,
+    "precision": 0.9723289777094543,
+    "recall": 0.9663865546218487,
+    "f1": 0.9693486590038314,
+    "roc_auc": 0.9968266491892335,
+    "pr_auc": 0.9948883835004209,
+    "best_threshold_f1": 0.47000000000000003,
+    "best_f1_at_threshold": 0.9698127627053879
+  },
+  "confusion_matrix": [
+    [
+      2160,
+      36
+    ],
+    [
+      44,
+      1265
+    ]
+  ],
+  "meta_weights": {
+    "text_prob_weight": 12.674324582400931,
+    "metadata_prob_weight": 2.57051139015698,
+    "intercept": -6.9622552466477785
+  },
+  "runtime_seconds": {
+    "split_s": 0.010148499999559135,
+    "oof_cv_s": 52.94364399999995,
+    "meta_train_s": 0.005935999999564956,
+    "final_base_train_s": 12.25257479999982,
+    "eval_s": 0.09324659999947471,
+    "total_s": 65.30856680000034
+  },
+  "best_threshold_metrics": {
+    "threshold": 0.47000000000000003,
+    "precision": 0.9701834862385321,
+    "recall": 0.9694423223834988,
+    "f1": 0.9698127627053879,
+    "confusion_matrix": [
+      [
+        2157,
+        39
+      ],
+      [
+        40,
+        1269
+      ]
+    ]
+  }
+}
